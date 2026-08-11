@@ -1,0 +1,4 @@
+nicegui
+fastapi
+a2wsgi
+pytest

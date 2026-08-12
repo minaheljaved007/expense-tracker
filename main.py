@@ -1,179 +1,309 @@
 """
 main.py
 -------
-NiceGUI front end for the Expense Tracker.
+Streamlit web interface for the Expense Tracker.
 
-This file is ONLY responsible for display and user interaction.
-All the actual math/state logic lives in tracker_logic.py and is
-imported here. That separation is what lets tracker_logic.py be
-unit-tested without a browser, and lets this UI be redesigned later
-without touching the accumulator logic at all.
+The calculation/state logic lives in tracker_logic.py.
+This file is only responsible for the web UI.
 
 Run locally:
-    python main.py
-Then open the URL it prints (usually http://localhost:8080).
+    streamlit run main.py
 """
 
-from nicegui import ui
+import streamlit as st
 
 from tracker_logic import ExpenseTracker, InvalidExpenseError
 
+
 # ---------------------------------------------------------------------
-# One tracker instance per browser tab/session.
-# NiceGUI gives each connecting client its own Python state when you
-# create objects inside a @ui.page function (see build_ui below), so
-# two different users won't see each other's expenses.
+# Page configuration
 # ---------------------------------------------------------------------
 
-CATEGORIES = ["General", "Food", "Transport", "Bills", "Shopping", "Health", "Entertainment", "Other"]
-
-
-@ui.page("/")
-def build_ui() -> None:
-    tracker = ExpenseTracker()
-
-    # -------------------- Header --------------------
-    with ui.header().classes("items-center justify-between bg-primary text-white px-6"):
-        ui.label("💰 Expense Tracker").classes("text-xl font-bold")
-        ui.label("DecodeLabs Project 2").classes("text-sm opacity-80")
-
-    with ui.column().classes("w-full max-w-2xl mx-auto p-4 gap-4"):
-
-        # -------------------- Summary card --------------------
-        with ui.card().classes("w-full"):
-            with ui.row().classes("w-full items-center justify-between"):
-                with ui.column().classes("gap-0"):
-                    ui.label("Total Spent").classes("text-sm text-gray-500")
-                    total_label = ui.label("$0.00").classes("text-4xl font-bold text-primary")
-                with ui.column().classes("gap-0 items-end"):
-                    count_label = ui.label("0 transactions").classes("text-sm text-gray-500")
-                    avg_label = ui.label("Avg: $0.00").classes("text-sm text-gray-500")
-
-        # -------------------- Add expense form --------------------
-        with ui.card().classes("w-full"):
-            ui.label("Add an expense").classes("text-lg font-semibold")
-
-            with ui.row().classes("w-full gap-2 items-start"):
-                amount_input = ui.input(
-                    label="Amount",
-                    placeholder="e.g. 250"
-                ).classes("flex-1").props("dense outlined")
-
-                category_select = ui.select(
-                    CATEGORIES, value="General", label="Category"
-                ).classes("w-40").props("dense outlined")
-
-            note_input = ui.input(
-                label="Note (optional)",
-                placeholder="e.g. Groceries at the market"
-            ).classes("w-full").props("dense outlined")
-
-            error_label = ui.label("").classes("text-red-500 text-sm")
-
-            def handle_add() -> None:
-                try:
-                    tracker.add_expense(
-                        raw_amount=amount_input.value,
-                        category=category_select.value,
-                        note=note_input.value,
-                    )
-                except InvalidExpenseError as e:
-                    # Exactly the "Defensive Coding" pattern from the slides:
-                    # catch the bad input, show a message, don't crash.
-                    error_label.text = str(e)
-                    return
-
-                error_label.text = ""
-                amount_input.value = ""
-                note_input.value = ""
-                amount_input.run_method("focus")
-                refresh_all()
-
-            amount_input.on("keydown.enter", handle_add)
-            ui.button("Add Expense", icon="add", on_click=handle_add).classes("w-full")
-
-        # -------------------- History list --------------------
-        with ui.card().classes("w-full"):
-            with ui.row().classes("w-full items-center justify-between"):
-                ui.label("History").classes("text-lg font-semibold")
-                clear_button = ui.button(
-                    "Clear All", icon="delete_sweep", color="negative"
-                ).props("outline dense")
-
-            history_container = ui.column().classes("w-full gap-1")
-
-        # -------------------- Category breakdown --------------------
-        with ui.card().classes("w-full"):
-            ui.label("By Category").classes("text-lg font-semibold")
-            breakdown_container = ui.column().classes("w-full gap-1")
-
-        # -------------------- Refresh logic --------------------
-        def refresh_all() -> None:
-            total_label.text = f"${tracker.total:,.2f}"
-            count_label.text = f"{tracker.count()} transaction{'s' if tracker.count() != 1 else ''}"
-            avg_label.text = f"Avg: ${tracker.average():,.2f}"
-
-            history_container.clear()
-            with history_container:
-                if not tracker.expenses:
-                    ui.label("No expenses yet — add your first one above.").classes(
-                        "text-gray-400 text-sm italic"
-                    )
-                else:
-                    # Most recent first
-                    for exp in reversed(tracker.expenses):
-                        with ui.row().classes(
-                            "w-full items-center justify-between p-2 rounded hover:bg-gray-100"
-                        ):
-                            with ui.column().classes("gap-0"):
-                                label_text = exp.category
-                                if exp.note:
-                                    label_text += f" — {exp.note}"
-                                ui.label(label_text).classes("font-medium")
-                                ui.label(exp.timestamp).classes("text-xs text-gray-400")
-                            with ui.row().classes("items-center gap-2"):
-                                ui.label(f"${exp.amount:,.2f}").classes("font-semibold")
-                                ui.button(
-                                    icon="close",
-                                    on_click=lambda _, eid=exp.id: handle_remove(eid),
-                                ).props("flat dense round size=sm color=negative")
-
-            breakdown_container.clear()
-            with breakdown_container:
-                breakdown = tracker.totals_by_category()
-                if not breakdown:
-                    ui.label("Nothing to break down yet.").classes("text-gray-400 text-sm italic")
-                else:
-                    for category, amount in sorted(breakdown.items(), key=lambda kv: -kv[1]):
-                        pct = (amount / tracker.total * 100) if tracker.total else 0
-                        with ui.column().classes("w-full gap-0"):
-                            with ui.row().classes("w-full items-center justify-between"):
-                                ui.label(category).classes("text-sm")
-                                ui.label(f"${amount:,.2f} ({pct:.0f}%)").classes("text-sm text-gray-500")
-                            ui.linear_progress(value=pct / 100, show_value=False).classes("h-2")
-
-        def handle_remove(expense_id: int) -> None:
-            tracker.remove_expense(expense_id)
-            refresh_all()
-
-        def handle_clear() -> None:
-            tracker.clear()
-            error_label.text = ""
-            refresh_all()
-
-        clear_button.on_click(handle_clear)
-
-        # Initial render
-        refresh_all()
+st.set_page_config(
+    page_title="Expense Tracker",
+    page_icon="💰",
+    layout="centered",
+)
 
 
 # ---------------------------------------------------------------------
-# Entry point
+# Constants
 # ---------------------------------------------------------------------
-if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(
-        title="Expense Tracker",
-        port=8080,
-        reload=True,   # auto-reload on save, handy for local dev in VS Code
-        show=False,    # set True if you want it to auto-open a browser tab
+
+CATEGORIES = [
+    "General",
+    "Food",
+    "Transport",
+    "Bills",
+    "Shopping",
+    "Health",
+    "Entertainment",
+    "Other",
+]
+
+
+# ---------------------------------------------------------------------
+# Session state
+# ---------------------------------------------------------------------
+
+# Streamlit reruns this file whenever the user interacts with the UI.
+# Therefore, the ExpenseTracker object must live in session_state.
+if "tracker" not in st.session_state:
+    st.session_state.tracker = ExpenseTracker()
+
+tracker = st.session_state.tracker
+
+
+# ---------------------------------------------------------------------
+# Styling
+# ---------------------------------------------------------------------
+
+st.markdown(
+    """
+    <style>
+        .main-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+
+        .subtitle {
+            color: #777;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ---------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------
+
+st.markdown(
+    '<div class="main-title">💰 Expense Tracker</div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="subtitle">Track, manage, and understand your expenses.</div>',
+    unsafe_allow_html=True,
+)
+
+st.divider()
+
+
+# ---------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric(
+        "Total Spent",
+        f"${tracker.total:,.2f}",
     )
+
+with col2:
+    count = tracker.count()
+    st.metric(
+        "Transactions",
+        count,
+    )
+
+with col3:
+    st.metric(
+        "Average",
+        f"${tracker.average():,.2f}",
+    )
+
+
+st.divider()
+
+
+# ---------------------------------------------------------------------
+# Add expense
+# ---------------------------------------------------------------------
+
+st.subheader("➕ Add an Expense")
+
+with st.form("add_expense_form", clear_on_submit=True):
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        amount = st.text_input(
+            "Amount",
+            placeholder="e.g. 250 or 1,250.50",
+        )
+
+    with col2:
+        category = st.selectbox(
+            "Category",
+            CATEGORIES,
+        )
+
+    note = st.text_input(
+        "Note (optional)",
+        placeholder="e.g. Groceries at the market",
+    )
+
+    submitted = st.form_submit_button(
+        "Add Expense",
+        use_container_width=True,
+    )
+
+    if submitted:
+
+        try:
+            tracker.add_expense(
+                raw_amount=amount,
+                category=category,
+                note=note,
+            )
+
+            st.success("Expense added successfully!")
+
+            # Rerun so all metrics/history update immediately.
+            st.rerun()
+
+        except InvalidExpenseError as error:
+            st.error(str(error))
+
+
+st.divider()
+
+
+# ---------------------------------------------------------------------
+# Expense history
+# ---------------------------------------------------------------------
+
+st.subheader("📋 Expense History")
+
+if not tracker.expenses:
+
+    st.info("No expenses yet — add your first expense above.")
+
+else:
+
+    # Display newest expenses first.
+    for expense in reversed(tracker.expenses):
+
+        col1, col2, col3 = st.columns([3, 2, 1])
+
+        with col1:
+            if expense.note:
+                st.write(
+                    f"**{expense.category}** — {expense.note}"
+                )
+            else:
+                st.write(
+                    f"**{expense.category}**"
+                )
+
+            st.caption(expense.timestamp)
+
+        with col2:
+            st.write(
+                f"**${expense.amount:,.2f}**"
+            )
+
+        with col3:
+
+            if st.button(
+                "🗑️",
+                key=f"delete_{expense.id}",
+            ):
+
+                tracker.remove_expense(expense.id)
+                st.rerun()
+
+
+st.divider()
+
+
+# ---------------------------------------------------------------------
+# Category breakdown
+# ---------------------------------------------------------------------
+
+st.subheader("📊 Spending by Category")
+
+breakdown = tracker.totals_by_category()
+
+if not breakdown:
+
+    st.info("Nothing to break down yet.")
+
+else:
+
+    for category, amount in sorted(
+        breakdown.items(),
+        key=lambda item: -item[1],
+    ):
+
+        percentage = (
+            amount / tracker.total * 100
+            if tracker.total
+            else 0
+        )
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            st.write(f"**{category}**")
+
+        with col2:
+            st.write(
+                f"${amount:,.2f} ({percentage:.0f}%)"
+            )
+
+        st.progress(
+            min(percentage / 100, 1.0)
+        )
+
+
+st.divider()
+
+
+# ---------------------------------------------------------------------
+# Clear all
+# ---------------------------------------------------------------------
+
+if tracker.expenses:
+
+    st.subheader("⚠️ Manage Data")
+
+    if st.button(
+        "Clear All Expenses",
+        type="secondary",
+        use_container_width=True,
+    ):
+
+        tracker.clear()
+
+        st.success("All expenses have been cleared.")
+
+        st.rerun()
+
+
+# ---------------------------------------------------------------------
+# Footer
+# ---------------------------------------------------------------------
+
+st.markdown(
+    """
+    <div style="text-align:center; color:#888; margin-top:2rem;">
+        Expense Tracker • Built with Python + Streamlit
+    </div>
+    """,
+    unsafe_allow_html=True,
+)

@@ -1,4 +1,4 @@
 nicegui
-fastapi
+uvicorn
 a2wsgi
-pytest
+fastapi
